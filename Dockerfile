@@ -1,18 +1,18 @@
 # Use an official Python runtime as a parent image
 FROM python:3.10
 
-# Set the working directory in the container
+# Set the working directory
 WORKDIR /app
 
-# Copy the project files to the working directory
+# Copy project files
 COPY . /app
 
 # Install dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Expose the port (if your bot requires it, remove if unnecessary)
+# Expose port 8080 (for dummy health check)
 EXPOSE 8080
 
-# Command to run the bot
-CMD ["python", "bot.py"]
+# Start a dummy HTTP server for health checks & run the bot
+CMD python -m http.server 8080 & python bot.py
