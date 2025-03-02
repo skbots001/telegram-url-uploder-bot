@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir --upgrade pip && \
 EXPOSE 8080
 
 # Command to run the bot
-CMD ["python", "bot.py"
+CMD ["python", "bot.py"]
