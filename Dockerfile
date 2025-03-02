@@ -1,18 +1,17 @@
-# Use an official Python runtime as a parent image
-FROM python:3.10
+# Use an official lightweight Python image
+FROM python:3.10-slim
 
 # Set the working directory
 WORKDIR /app
 
-# Copy project files
-COPY . /app
+# Copy the bot files
+COPY . .
 
 # Install dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose port 8080 (for dummy health check)
+# Expose the port (not required for Telegram bots, but useful if needed)
 EXPOSE 8080
 
-# Start a dummy HTTP server for health checks & run the bot
-CMD python -m http.server 8080 & python bot.py
+# Start the bot
+CMD ["python", "main.py"]
