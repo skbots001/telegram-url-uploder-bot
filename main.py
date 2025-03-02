@@ -1,38 +1,39 @@
 import os
 import requests
-import threading
-from flask import Flask
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from moviepy.editor import VideoFileClip  # For video compression
+from pyrogram.errors import RPCError
 
-# Get your Telegram API credentials from environment variables
-API_ID = os.getenv("API_ID")
+# Telegram API Credentials
+API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # Ensure ADMIN_ID is an integer
+ADMIN_ID = int(os.getenv("ADMIN_ID"))  # Ensure this is an integer
 
 app = Client("URLUploaderBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Directory to store files temporarily
 DOWNLOAD_FOLDER = "downloads"
+COMPRESSED_FOLDER = "compressed"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+os.makedirs(COMPRESSED_FOLDER, exist_ok=True)
 
-@app.on_message(filters.command("start") & filters.private)
-async def start(client, message: Message):
-    await message.reply("👋 Hello! I am a URL Uploader Bot.\nSend me a URL with `/upload <URL>` to start.")
+# Function to send progress updates
+async def progress_callback(current, total, message: Message):
+    percent = int((current / total) * 100)
+    await message.edit(f"📥 Downloading... {percent}%")
 
-@app.on_message(filters.command("help") & filters.private)
-async def help_command(client, message: Message):
-    help_text = "📌 **Available Commands:**\n"
-    help_text += "/start - Welcome message\n"
-    help_text += "/upload <URL> - Upload file from URL\n"
-    help_text += "/help - Show this message\n"
-    
-    if message.from_user.id == ADMIN_ID:
-        help_text += "\n⚙️ **Admin Commands:**\n"
-        help_text += "/stats - Show bot usage stats\n"
-    
-    await message.reply(help_text)
+# Video Compression Function
+def compress_video(input_file, output_file, target_size=1900):
+    try:
+        clip = VideoFileClip(input_file)
+        clip_resized = clip.resize(height=480)  # Resize for compression
+        clip_resized.write_videofile(output_file, bitrate="1000k", codec="libx264")
+        return output_file
+    except Exception as e:
+        return None
 
 @app.on_message(filters.command("upload") & filters.private)
 async def upload_file(client, message: Message):
@@ -43,48 +44,57 @@ async def upload_file(client, message: Message):
     url = message.command[1]
     file_name = url.split("/")[-1]
     file_path = os.path.join(DOWNLOAD_FOLDER, file_name)
+    compressed_file_path = os.path.join(COMPRESSED_FOLDER, "compressed_" + file_name)
 
-    await message.reply(f"📥 Downloading `{file_name}`...")
+    # Notify user about download start
+    progress_msg = await message.reply(f"📥 Downloading `{file_name}`...")
 
     try:
-        response = requests.get(url, stream=True)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, stream=True, headers=headers)
         response.raise_for_status()
         
         with open(file_path, "wb") as file:
             for chunk in response.iter_content(chunk_size=1024):
                 file.write(chunk)
 
-        await message.reply(f"✅ Download complete! Uploading `{file_name}` to Telegram...")
+        await progress_msg.edit(f"✅ Download complete! Uploading `{file_name}` to Telegram...")
 
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=file_path,
-            caption=f"📂 Here is your file: `{file_name}`"
-        )
+        # Check if the file is a video and needs compression
+        if file_name.lower().endswith(('.mp4', '.mkv', '.avi', '.mov')):
+            file_size = os.path.getsize(file_path) / (1024 * 1024)  # Size in MB
+            if file_size > 2000:  # If file is over 2GB, compress it
+                await progress_msg.edit("⚠️ Video too large! Compressing...")
+                compressed_file = compress_video(file_path, compressed_file_path)
+                if compressed_file:
+                    file_path = compressed_file
+                    await progress_msg.edit("✅ Compression Complete! Uploading now...")
+                else:
+                    await progress_msg.edit("❌ Compression failed! Uploading original file...")
+
+            # Send video
+            await client.send_video(
+                chat_id=message.chat.id,
+                video=file_path,
+                caption=f"🎥 Here is your video: `{file_name}`"
+            )
+        else:
+            await client.send_document(
+                chat_id=message.chat.id,
+                document=file_path,
+                caption=f"📁 Here is your file: `{file_name}`"
+            )
 
         os.remove(file_path)  # Clean up the file after sending it
+        if os.path.exists(compressed_file_path):
+            os.remove(compressed_file_path)
+
+    except RPCError as rpc_error:
+        await progress_msg.edit(f"❌ Telegram Error: {rpc_error}")
     except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-
-@app.on_message(filters.command("stats") & filters.private)
-async def stats(client, message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.reply("❌ You are not authorized to use this command!")
-        return
-    
-    file_count = len(os.listdir(DOWNLOAD_FOLDER))
-    await message.reply(f"📊 **Bot Stats:**\nFiles stored: {file_count}")
-
-# Flask app for health check
-app_flask = Flask(__name__)
-
-@app_flask.route('/')
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    app_flask.run(host="0.0.0.0", port=8080)
+        await progress_msg.edit(f"❌ Error: {e}")
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()  # Start Flask health check server
-    app.run()  # Start Telegram bot
+    app.run()
