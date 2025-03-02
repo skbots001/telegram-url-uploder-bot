@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install ffmpeg (needed for moviepy)
-RUN apt-get update && apt-get install -y ffmpeg
+# Install ffmpeg and other dependencies for moviepy
+RUN apt-get update && apt-get install -y ffmpeg libxext6 libxrender1 libgl1
 
 COPY . .
 
